@@ -22,6 +22,24 @@ npm run dev
 
 ブラウザで `http://localhost:4321` を開きます。
 
+ナビゲーションから5つのパターンを切り替えられます。
+
+- `/` — Gallery：単色の通常カード
+- `/soft/` — Soft：柔らかく変形するカード
+- `/photo/` — Photo：通常カードの全面にUnsplashの風景写真を表示
+- `/text/` — Text：落下する通常カードの中央にHTML、CSSなどの文字を表示
+- `/timeline/` — Timeline：中央の縦線に沿って、年号と説明文を含むカード全体が左右交互に4枚落下
+
+Timelineは `src/pages/timeline.astro` の `milestones` で年号と説明文を編集できます。中央の線が下へ伸び、左2枚・右2枚が着地します。Tweakpaneから落下を再生でき、狭い画面や動きを抑える設定では静止表示になります。
+
+TimelineでもTweakpaneの「Soft」で通常／柔らかいカードを切り替えられます。年号と説明文がカードの変形に追従し、どちらのモードでも落ち始めの高さは `0.25` が初期値です。
+
+「カードの色」のカラーピッカーで4枚の色を一括変更できます。色はその場で反映され、Soft切り替え後もURLに保持されます。「初期状態に戻す」で元の紺色（`#243048`）に戻ります。
+
+Textページでは、幅1024px以上かつ動きを抑える設定がオフのとき、Tweakpaneの「Soft」で通常／柔らかいオブジェクトを選べます。切り替えると同じページを再読み込みして落下を再生し、選択はURLの `physics` パラメータに保持します。カード下の16pxの説明文は動きません。
+
+PhotoはGalleryと共通の `src/components/RigidGallery.astro` と `src/scripts/main.js` を使います。写真は `public/images/landscapes/` にJPEGとして保存しているため、表示時にUnsplashへの接続は不要です。撮影者と写真の出典は `src/scripts/landscapes.js` に記録し、Photoページの下部にもリンクを表示しています。
+
 | Command | Action |
 | :------ | :----- |
 | `npm run dev` | 開発サーバー起動 |
