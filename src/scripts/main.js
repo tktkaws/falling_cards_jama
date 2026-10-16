@@ -1,32 +1,33 @@
 import Matter from "matter-js";
 import { Pane } from "tweakpane";
-import { cards } from "./cards.js";
+import { addPhysicsModeControl } from "./physics-mode.js";
+import { addCardColorControl } from "./card-color.js";
 
 const { Engine, Runner, Bodies, Body, Composite, Events, Sleeping } = Matter;
 
 const WIDE_QUERY = "(min-width: 1024px)";
 const WALL_THICKNESS = 220;
+const stage = document.querySelector("#stage");
 
 const defaults = {
 	angle: (0.04 * 180) / Math.PI,
 	restitution: 0.34,
-	dropDistance: 0.85,
+	dropDistance: Number(stage?.dataset.dropDistance ?? 0.85),
 	gravity: 1.05,
 	frictionAir: 0.006,
-	dropInterval: 140,
+	dropInterval: Number(stage?.dataset.dropInterval ?? 140),
 	lockFrames: 18,
 };
 const params = { ...defaults };
 
-const stage = document.querySelector("#stage");
 const picElements = [...document.querySelectorAll("#stage .pic")];
 const wide = window.matchMedia(WIDE_QUERY);
 const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
 let replay = () => {};
 
-if (!stage || picElements.length !== cards.length) {
-	throw new Error("Falling cards markup does not match the card list.");
+if (!stage || picElements.length === 0) {
+	throw new Error("Falling cards requires a stage with at least one object.");
 }
 
 if (reduceMotion.matches || !wide.matches) {
@@ -132,6 +133,7 @@ function startPhysics() {
 	let dropTimers = [];
 
 	function scheduleDrops() {
+		stage.dispatchEvent(new CustomEvent("cards:replay", { detail: { dropInterval: params.dropInterval } }));
 		dropTimers = items.map((item, index) =>
 			window.setTimeout(() => drop(item), index * params.dropInterval),
 		);
@@ -341,6 +343,8 @@ function mountPane() {
 	if (stage.dataset.physics !== "on") return;
 
 	const pane = new Pane({ title: "調整" });
+	addPhysicsModeControl(pane);
+	const resetCardColor = addCardColorControl(pane);
 	let resetting = false;
 	const onMotion = (event) => {
 		if (resetting || !event.last) return;
@@ -357,6 +361,7 @@ function mountPane() {
 	pane.addButton({ title: "もう一度落とす" }).on("click", () => replay());
 	pane.addButton({ title: "初期状態に戻す" }).on("click", () => {
 		Object.assign(params, defaults);
+		resetCardColor();
 		resetting = true;
 		pane.refresh();
 		resetting = false;

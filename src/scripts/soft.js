@@ -1,14 +1,16 @@
 import Matter from "matter-js";
 import { Pane } from "tweakpane";
+import { addPhysicsModeControl } from "./physics-mode.js";
+import { addCardColorControl } from "./card-color.js";
 
 const { Engine, Runner, Bodies, Body, Composite, Composites, Constraint } = Matter;
 const NS = "http://www.w3.org/2000/svg";
-const defaults = { skeleton: false, columns: 6, rows: 6, angle: (0.04 * 180) / Math.PI, restitution: 0.34, dropDistance: 0.85, gravity: 1.05, frictionAir: 0.006, dropInterval: 140, lockFrames: 18 };
+const stage = document.querySelector("#stage");
+const defaults = { skeleton: false, columns: 6, rows: 6, angle: (0.04 * 180) / Math.PI, restitution: 0.34, dropDistance: Number(stage?.dataset.dropDistance ?? 0.85), gravity: 1.05, frictionAir: 0.006, dropInterval: Number(stage?.dataset.dropInterval ?? 140), lockFrames: 18 };
 const params = { ...defaults };
 const WALL = 220;
 
-const stage = document.querySelector("#stage");
-const cards = [...document.querySelectorAll("#stage .card")];
+const cards = [...document.querySelectorAll("#stage .pic")];
 const reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
 const wide = window.matchMedia("(min-width: 1024px)");
 
@@ -22,6 +24,7 @@ function start() {
 	const runner = Runner.create();
 	const svg = document.createElementNS(NS, "svg");
 	svg.setAttribute("class", "skin");
+	svg.setAttribute("aria-hidden", "true");
 	stage.append(svg);
 	const stageRect = stage.getBoundingClientRect();
 	svg.setAttribute("width", String(stageRect.width));
@@ -152,12 +155,16 @@ function start() {
 				Matter.Sleeping.set(body, false);
 			}
 			for (const cell of item.cells) cell.path.setAttribute("opacity", "0");
+			item.label?.setAttribute("opacity", "0");
 			item.skeleton.group.setAttribute("display", "none");
 		}
+		stage.dispatchEvent(new CustomEvent("cards:replay", { detail: { dropInterval: params.dropInterval } }));
 		dropTimers = items.map((item, index) => window.setTimeout(() => drop(item), index * params.dropInterval));
 		resume();
 	}
 	const pane = new Pane({ title: "調整" });
+	addPhysicsModeControl(pane);
+	const resetCardColor = addCardColorControl(pane);
 	let resetting = false;
 	pane.addBinding(params, "skeleton", { label: "骨格を表示" }).on("change", () => {
 		if (!resetting) for (const item of items) paintSkeleton(item);
@@ -177,6 +184,7 @@ function start() {
 	for (const [key, label, max, step] of controls) pane.addBinding(params, key, { label, min: key === "lockFrames" ? 1 : 0, max, step }).on("change", (event) => { if (!resetting && event.last) replay(); });
 	pane.addButton({ title: "もう一度落とす" }).on("click", replay);
 	pane.addButton({ title: "初期状態に戻す" }).on("click", () => {
+		resetCardColor();
 		Object.assign(params, defaults); resetting = true; pane.refresh(); resetting = false; replay();
 	});
 	replay();
@@ -200,10 +208,9 @@ function centerX(bodies) {
 	return bodies.reduce((sum, body) => sum + body.position.x, 0) / bodies.length;
 }
 
-function createItem(card, index, stageRect, svg) {
+function createItem(pic, index, stageRect, svg) {
 	const COLUMNS = params.columns;
 	const ROWS = params.rows;
-	const pic = card.querySelector(".pic");
 	const rect = pic.getBoundingClientRect();
 	const x = rect.left - stageRect.left + rect.width / 2;
 	const y = rect.top - stageRect.top + rect.height / 2;
@@ -251,10 +258,31 @@ function createItem(card, index, stageRect, svg) {
 	for (let column = COLUMNS - 2; column >= 0; column -= 1) ids.push((ROWS - 1) * COLUMNS + column);
 	for (let row = ROWS - 2; row > 0; row -= 1) ids.push(row * COLUMNS);
 	const path = document.createElementNS(NS, "path");
+	path.setAttribute("data-soft-surface", "");
 	path.setAttribute("fill", fill);
 	path.setAttribute("opacity", "0");
 	svg.append(path);
 	const cells = [{ path, ids }];
+	// Text follows the soft body's center, angle and stretch, outside the static desc.
+	const sourceLabel = pic.querySelector(".object-label");
+	let label = null;
+	if (pic.hasAttribute("data-soft-content")) {
+		label = createContentOverlay(pic, width, height);
+		svg.append(label);
+	} else if (sourceLabel) {
+		const style = getComputedStyle(sourceLabel);
+		label = document.createElementNS(NS, "text");
+		label.textContent = sourceLabel.textContent;
+		label.setAttribute("text-anchor", "middle");
+		label.setAttribute("dominant-baseline", "central");
+		label.setAttribute("fill", style.color);
+		label.setAttribute("font-family", style.fontFamily);
+		label.setAttribute("font-size", style.fontSize);
+		label.setAttribute("font-weight", style.fontWeight);
+		label.setAttribute("letter-spacing", style.letterSpacing);
+		label.setAttribute("opacity", "0");
+		svg.append(label);
+	}
 	const skeletonGroup = document.createElementNS(NS, "g");
 	skeletonGroup.setAttribute("display", "none");
 	const links = document.createElementNS(NS, "path");
@@ -273,7 +301,30 @@ function createItem(card, index, stageRect, svg) {
 	skeletonGroup.append(links, ...nodes);
 	svg.append(skeletonGroup);
 	const skeleton = { group: skeletonGroup, links, nodes };
-	return { index, x, y, width, height, composite, rests, shelf, cells, skeleton, dropped: false, locked: false, calm: 0, fade: 0, spawnY: y - height * params.dropDistance };
+	return { index, x, y, width, height, columns: COLUMNS, rows: ROWS, composite, rests, shelf, cells, label, skeleton, dropped: false, locked: false, calm: 0, fade: 0, spawnY: y - height * params.dropDistance };
+}
+
+function createContentOverlay(source, width, height) {
+	const overlay = document.createElementNS(NS, "foreignObject");
+	overlay.setAttribute("x", String(-width / 2));
+	overlay.setAttribute("y", String(-height / 2));
+	overlay.setAttribute("width", String(width));
+	overlay.setAttribute("height", String(height));
+	overlay.setAttribute("opacity", "0");
+	const content = document.createElement("div");
+	for (const child of source.childNodes) content.append(child.cloneNode(true));
+	// Copy typography and spacing without copying the hidden/animated card box.
+	const originals = [source, ...source.querySelectorAll("*")];
+	const copies = [content, ...content.querySelectorAll("*")];
+	const properties = ["box-sizing", "color", "font-family", "font-size", "font-weight", "font-style", "font-variant-numeric", "line-height", "letter-spacing", "text-align", "overflow-wrap", "margin", "padding"];
+	originals.forEach((element, index) => {
+		const style = getComputedStyle(element);
+		for (const property of properties) copies[index].style.setProperty(property, style.getPropertyValue(property));
+	});
+	content.style.width = "100%";
+	content.style.height = "100%";
+	overlay.append(content);
+	return overlay;
 }
 
 function paint(item) {
@@ -284,6 +335,24 @@ function paint(item) {
 		const points = cell.ids.map((id) => item.composite.bodies[id].position);
 		cell.path.setAttribute("opacity", String(item.fade));
 		cell.path.setAttribute("d", `M${points.map(({ x, y }) => `${x},${y}`).join(" L")} Z`);
+	}
+	if (item.label) {
+		const bodies = item.composite.bodies;
+		// Average the opposite edges to avoid jitter from a single particle.
+		const edge = (ids) => ids.reduce((sum, id) => ({
+			x: sum.x + bodies[id].position.x / ids.length,
+			y: sum.y + bodies[id].position.y / ids.length,
+		}), { x: 0, y: 0 });
+		const left = edge(Array.from({ length: item.rows }, (_, row) => row * item.columns));
+		const right = edge(Array.from({ length: item.rows }, (_, row) => row * item.columns + item.columns - 1));
+		const top = edge(Array.from({ length: item.columns }, (_, column) => column));
+		const bottom = edge(Array.from({ length: item.columns }, (_, column) => (item.rows - 1) * item.columns + column));
+		const a = (right.x - left.x) / item.width;
+		const b = (right.y - left.y) / item.width;
+		const c = (bottom.x - top.x) / item.height;
+		const d = (bottom.y - top.y) / item.height;
+		item.label.setAttribute("transform", `matrix(${a} ${b} ${c} ${d} ${centerX(bodies)} ${centerY})`);
+		item.label.setAttribute("opacity", String(item.fade));
 	}
 	paintSkeleton(item);
 }
