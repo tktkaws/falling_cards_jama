@@ -1,0 +1,285 @@
+---
+import { cards, imageSrc } from "../scripts/cards.js";
+import SiteNav from "./SiteNav.astro";
+
+interface Photo {
+	src: string;
+	alt: string;
+	author: string;
+	url: string;
+}
+interface Props {
+	title?: string;
+	description?: string;
+	photos?: Photo[];
+	objectLabels?: string[];
+	cardDescriptions?: string[];
+	selectablePhysics?: boolean;
+}
+const {
+	title = "Falling Cards",
+	description = "画像がそれぞれの枠の上から現れ、跳ねて、枠の位置で止まります。",
+	photos = [],
+	objectLabels = [],
+	cardDescriptions = [],
+	selectablePhysics = false,
+} = Astro.props;
+const CardTag = cardDescriptions.length > 0 ? "article" : "a";
+---
+
+<html lang="ja">
+	<head>
+		<meta charset="utf-8" />
+		<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+		<meta name="viewport" content="width=device-width" />
+		<meta name="generator" content={Astro.generator} />
+		<title>{title}</title>
+		<meta name="description" content={description} />
+		<script is:inline>
+			const wide = window.matchMedia("(min-width: 1024px)").matches;
+			const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+			if (wide && !reduce) document.documentElement.classList.add("is-live");
+		</script>
+		<style is:global>
+			*,
+			*::before,
+			*::after {
+				box-sizing: border-box;
+			}
+
+			html {
+				background: #fff;
+				--header-gap: 5rem;
+				--row-gap: 100px;
+				--drop-distance: 0.85;
+			}
+
+			body {
+				margin: 0;
+				background: #fff;
+				color: #1a1a1a;
+				font-family: "Helvetica Neue", "Hiragino Sans", "Noto Sans JP", sans-serif;
+			}
+
+			.masthead {
+				max-width: 1080px;
+				margin: 0 auto;
+				padding: 1.5rem 1.25rem var(--header-gap);
+			}
+
+			.masthead h1 {
+				margin: 0;
+				font-size: 1rem;
+				font-weight: 650;
+				letter-spacing: 0.04em;
+			}
+
+			.masthead p {
+				margin: 0.35rem 0 0;
+				font-size: 0.82rem;
+				line-height: 1.5;
+				opacity: 0.72;
+			}
+
+			.grid {
+				position: relative;
+				display: grid;
+				grid-template-columns: 1fr;
+				row-gap: var(--row-gap);
+				column-gap: 28px;
+				max-width: 1080px;
+				margin: 0 auto;
+				padding-inline: 1.25rem;
+				padding-bottom: 4rem;
+			}
+
+			.card {
+				display: block;
+				color: inherit;
+				text-decoration: none;
+			}
+
+			.card:focus-visible {
+				outline: 2px solid #1a1a1a;
+				outline-offset: 4px;
+			}
+
+			.pic {
+				position: relative;
+				aspect-ratio: 35 / 14;
+				overflow: hidden;
+				border-radius: 5px;
+			}
+
+			.pic img {
+				display: block;
+				width: 100%;
+				height: 100%;
+				object-fit: cover;
+			}
+
+			.object-label {
+				position: absolute;
+				inset: 0;
+				display: grid;
+				place-items: center;
+				padding: 1rem;
+				color: #fff;
+				font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+				font-size: clamp(1.5rem, 3.5vw, 2.75rem);
+				font-weight: 700;
+				line-height: 1;
+				letter-spacing: -0.04em;
+				pointer-events: none;
+			}
+
+			.desc {
+				margin: 14px 0 0;
+				font-size: 16px;
+				line-height: 1.8;
+			}
+
+			.label {
+				margin: 14px 0 0;
+				font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+				font-size: clamp(0.94rem, 0.4vw + 0.85rem, 1.125rem);
+				line-height: 1.3;
+			}
+
+			.tags {
+				display: flex;
+				flex-wrap: wrap;
+				gap: 5px;
+				margin: 10px 0 0;
+				padding: 0;
+				list-style: none;
+			}
+
+			.tags li {
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				border: 1px solid #1a1a1a;
+				border-radius: 5px;
+				padding: 4px 10px;
+				font-size: 0.8rem;
+				line-height: 1.2;
+			}
+
+			.name {
+				margin: 1em 0 0;
+				font-size: 1.3rem;
+				line-height: 1.45;
+				text-decoration: underline;
+				text-decoration-thickness: 1px;
+				text-underline-offset: 2px;
+			}
+
+			@media (min-width: 1024px) {
+				.grid {
+					grid-template-columns: repeat(3, 1fr);
+				}
+
+				.pic {
+					aspect-ratio: 43 / 20;
+				}
+			}
+
+			.tp-dfwv {
+				z-index: 30;
+				width: min(280px, calc(100vw - 1.5rem));
+			}
+
+			.photo-credits { max-width: 1080px; margin: 0 auto; padding: 0 1.25rem 2rem; font-size: 0.75rem; line-height: 1.8; color: #555; }
+			.photo-credits p { margin: 0 0 0.4rem; }
+			.photo-credits ul { display: flex; flex-wrap: wrap; gap: 0.3rem 1rem; padding: 0; margin: 0; list-style: none; }
+			.photo-credits a { color: inherit; text-underline-offset: 3px; }
+
+			html.is-live .grid {
+				/* 初期の落ち始めの高さ。3列・画像比 43/20 のときの画像の高さに掛ける */
+				padding-top: calc(var(--drop-distance) * (min(100%, 1080px) - 2.5rem - 56px) / 3 * 20 / 43);
+			}
+
+			html.is-live .pic {
+				position: relative;
+				z-index: 1;
+				visibility: hidden;
+				opacity: 0;
+				transform: translate3d(0, -85%, 0) rotate(-2.25deg);
+				transform-origin: center center;
+				will-change: transform, opacity;
+			}
+
+			html.is-live #stage[data-physics-mode="soft"] .pic {
+				/* The SVG renders the moving object; retain its original layout box. */
+				visibility: visible;
+				transform: none;
+				will-change: auto;
+			}
+
+			.skin {
+				position: absolute;
+				inset: 0;
+				z-index: 4;
+				width: 100%;
+				height: 100%;
+				overflow: visible;
+				pointer-events: none;
+			}
+		</style>
+	</head>
+	<body>
+		<SiteNav />
+		<header class="masthead">
+			<h1>{title}</h1>
+			<p>{description}</p>
+		</header>
+
+		<main>
+			<div id="stage" class="grid" data-selectable-physics={selectablePhysics ? "true" : undefined}>
+				{
+					cards.map((card, index) => (
+						<CardTag class="card" href={CardTag === "a" ? "#" : undefined} draggable="false">
+							<div class="pic" style={`background:${card.bg}`}>
+								<img src={photos[index]?.src ?? imageSrc(card)} alt={photos[index]?.alt ?? ""} width={photos[index] ? 1200 : 860} height={photos[index] ? 560 : 400} decoding="async" draggable="false" />
+								{objectLabels[index] && <span class="object-label">{objectLabels[index]}</span>}
+							</div>
+							{cardDescriptions.length > 0 ? (
+								<p class="desc">{cardDescriptions[index]}</p>
+							) : <>
+							<p class="label">{card.date}</p>
+							<ul class="tags">
+								{card.tags.map((tag) => (
+									<li>{tag}</li>
+								))}
+							</ul>
+							<p class="name">{card.title}</p>
+							</>}
+						</CardTag>
+					))
+				}
+			</div>
+		</main>
+
+		{photos.length > 0 && (
+			<footer class="photo-credits">
+				<p>Photography / Unsplash</p>
+				<ul>{photos.map((photo) => <li><a href={photo.url}>{photo.author}</a></li>)}</ul>
+			</footer>
+		)}
+
+		<noscript>
+			<style>
+				html.is-live .pic {
+					visibility: visible;
+					opacity: 1;
+					transform: none;
+				}
+			</style>
+		</noscript>
+
+		<script>
+			import "../scripts/physics.js";
+		</script>
+	</body>
+</html>
