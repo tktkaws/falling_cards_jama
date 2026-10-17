@@ -34,9 +34,73 @@ Timelineは `src/pages/timeline.astro` の `milestones` で年号と説明文を
 
 TimelineでもTweakpaneの「Soft」で通常／柔らかいカードを切り替えられます。年号と説明文がカードの変形に追従し、どちらのモードでも落ち始めの高さは `0.25` が初期値です。
 
-「カードの色」のカラーピッカーで4枚の色を一括変更できます。色はその場で反映され、Soft切り替え後もURLに保持されます。「初期状態に戻す」で元の紺色（`#243048`）に戻ります。
+「カードの色」のカラーピッカーで4枚の色を一括変更できます。色はその場で反映され、Soft切り替えもページの再読み込みなしで行えます。「初期状態に戻す」で元の紺色（`#243048`）に戻ります。
 
-Textページでは、幅1024px以上かつ動きを抑える設定がオフのとき、Tweakpaneの「Soft」で通常／柔らかいオブジェクトを選べます。切り替えると同じページを再読み込みして落下を再生し、選択はURLの `physics` パラメータに保持します。カード下の16pxの説明文は動きません。
+### Timelineを別ページに配置する
+
+`src/components/Timeline.astro` にHTML・CSS・動作処理をまとめています。年号と説明文はHTMLのまま表示し、Softでも同じHTMLを動かします。SVGは変形する背景と骨格の描画にだけ使用します。ページ固有のナビや見出しはコンポーネントに含みません。
+
+```astro
+---
+import Timeline from "../components/Timeline.astro";
+
+const history = [
+  { year: "2023", description: "プロジェクトを開始しました。" },
+  { year: "2024", description: "最初のサービスを公開しました。" },
+];
+---
+
+<Timeline items={history} />
+```
+
+調整パネルを付ける場合は `<Timeline items={history} showControls />`、最初からSoftにする場合は `soft` を追加します。
+
+| プロパティ | 初期値 | 内容 |
+| :--- | :--- | :--- |
+| `items` | 必須 | `{ year: string, description: string }` の配列。枚数は自由 |
+| `label` | `"タイムライン"` | セクションのアクセシブルな名前 |
+| `color` | `"#243048"` | カードの共通色（6桁のHEX形式） |
+| `soft` | `false` | 初期の物理モード |
+| `showControls` | `false` | コンポーネント内に折りたたみ式Tweakpaneを表示 |
+| `dropDistance` | `0.25` | カードの高さに対する落下距離の倍率 |
+| `dropInterval` | `320` | カード間の落下開始間隔（ミリ秒） |
+| `settingsKey` | 未指定 | 指定すると色・Soft設定をURLに保持。複数配置では異なるキーを指定 |
+
+同じページに複数配置できます。固定IDやページ全体のスタイルへの依存はありません。JavaScriptが無効な場合、幅1024px未満の場合、動きを抑える設定の場合も、通常のHTMLとして読めます。
+
+別のAstroプロジェクトに移す際は、このファイルをコピーし、`npm install matter-js tweakpane` で依存パッケージを追加してください。他のローカルJSファイルは不要です。
+
+### Textを別ページに配置する
+
+`src/components/TextCards.astro` にHTML・CSS・動作処理をまとめています。カード上の文字はHTMLで表示し、カード下の16pxの説明文は固定したままです。Softでも同じHTMLの文字が動き、SVGは背景と骨格の描画にだけ使用します。
+
+```astro
+---
+import TextCards from "../components/TextCards.astro";
+
+const skills = [
+  { label: "HTML", description: "Webページの構造を表現します。", color: "#1f4d3a" },
+  { label: "CSS", description: "Webページの見た目を整えます。", color: "#243048" },
+];
+---
+
+<TextCards items={skills} showControls />
+```
+
+| プロパティ | 初期値 | 内容 |
+| :--- | :--- | :--- |
+| `items` | 必須 | `{ label: string, description: string, color?: string }` の配列。枚数は自由 |
+| `label` | `"テキストカード"` | セクションのアクセシブルな名前 |
+| `color` | `"#243048"` | 個別色を省略したカードの背景色 |
+| `soft` | `false` | 初期の物理モード |
+| `showControls` | `false` | 折りたたみ式Tweakpaneを表示 |
+| `dropDistance` | `0.85` | カードの高さに対する落下距離の倍率 |
+| `dropInterval` | `140` | カード間の落下開始間隔（ミリ秒） |
+| `settingsKey` | 未指定 | 指定するとSoft設定をURLに保持。複数配置では異なるキーを指定 |
+
+Soft切り替えはページの再読み込みなしで反映されます。幅1024px未満や動きを抑える設定では静止表示になり、JavaScriptが無効でも本文を読めます。同じページに複数配置したり、Timelineと併用したりできます。
+
+別のAstroプロジェクトへは `TextCards.astro` をコピーし、`npm install matter-js tweakpane` で依存パッケージを追加してください。他のローカルコンポーネントやJSファイルは不要です。
 
 PhotoはGalleryと共通の `src/components/RigidGallery.astro` と `src/scripts/main.js` を使います。写真は `public/images/landscapes/` にJPEGとして保存しているため、表示時にUnsplashへの接続は不要です。撮影者と写真の出典は `src/scripts/landscapes.js` に記録し、Photoページの下部にもリンクを表示しています。
 
