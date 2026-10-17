@@ -1,18 +1,39 @@
 ---
-import RigidGallery from "../components/RigidGallery.astro";
+import SiteNav from "../components/SiteNav.astro";
+import TextCards from "../components/TextCards.astro";
+
+const items = [
+	{ label: "HTML", description: "HTMLは、見出しや段落、リンクなどを使って、Webページの内容と構造を表現します。", color: "#1f4d3a" },
+	{ label: "CSS", description: "CSSは、文字の色やサイズ、余白、レイアウトを指定して、Webページの見た目を整えます。", color: "#243048" },
+	{ label: "JavaScript", description: "JavaScriptは、クリックへの反応やアニメーションなど、Webページに動きを加えます。", color: "#8c3d2f" },
+	{ label: "TypeScript", description: "TypeScriptは、JavaScriptに型の仕組みを加え、コードの意図を明確にして開発を助けます。", color: "#3d4a55" },
+	{ label: "Astro", description: "Astroは、コンテンツを中心としたWebサイトを、コンポーネントを組み合わせて構築できます。", color: "#6b4a2e" },
+	{ label: "React", description: "Reactは、画面を小さなコンポーネントに分け、データの変化に合わせて表示を更新します。", color: "#1c3f5a" },
+];
 ---
 
-<RigidGallery
-	title="Falling Cards — Text"
-	selectablePhysics
-	description="文字を乗せたカードが、上から落ちて、跳ねて、枠の位置で止まります。"
-	objectLabels={["HTML", "CSS", "JavaScript", "TypeScript", "Astro", "React"]}
-	cardDescriptions={[
-		"HTMLは、見出しや段落、リンクなどを使って、Webページの内容と構造を表現します。",
-		"CSSは、文字の色やサイズ、余白、レイアウトを指定して、Webページの見た目を整えます。",
-		"JavaScriptは、クリックへの反応やアニメーションなど、Webページに動きを加えます。",
-		"TypeScriptは、JavaScriptに型の仕組みを加え、コードの意図を明確にして開発を助けます。",
-		"Astroは、コンテンツを中心としたWebサイトを、コンポーネントを組み合わせて構築できます。",
-		"Reactは、画面を小さなコンポーネントに分け、データの変化に合わせて表示を更新します。",
-	]}
-/>
+<html lang="ja">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width" />
+		<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+		<title>Falling Cards — Text</title>
+		<meta name="description" content="文字を乗せたカードが、上から落ちて、跳ねて、枠の位置で止まります。" />
+	</head>
+	<body>
+		<SiteNav />
+		<header class="masthead">
+			<h1>Falling Cards — Text</h1>
+			<p>文字を乗せたカードが、上から落ちて、跳ねて、枠の位置で止まります。</p>
+		</header>
+		<main><TextCards items={items} showControls settingsKey="text" /></main>
+	</body>
+</html>
+
+<style is:global>
+	*, *::before, *::after { box-sizing: border-box; }
+	body { margin: 0; background: #fff; color: #1a1a1a; font-family: "Helvetica Neue", "Hiragino Sans", "Noto Sans JP", sans-serif; }
+	.masthead { max-width: 1080px; margin: 0 auto; padding: 1.5rem 1.25rem 5rem; }
+	.masthead h1 { margin: 0; font-size: 1rem; font-weight: 650; letter-spacing: 0.04em; }
+	.masthead p { margin: 0.35rem 0 0; font-size: 0.82rem; line-height: 1.5; color: #555; }
+</style>

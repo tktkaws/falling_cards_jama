@@ -1,0 +1,320 @@
+---
+export interface TextCardItem {
+	label: string;
+	description: string;
+	color?: string;
+}
+
+interface Props {
+	items: TextCardItem[];
+	label?: string;
+	color?: string;
+	soft?: boolean;
+	showControls?: boolean;
+	dropDistance?: number;
+	dropInterval?: number;
+	/** Use a unique key per instance to remember the physics mode in the URL. */
+	settingsKey?: string;
+}
+
+const {
+	items, label = "テキストカード", color = "#243048", soft = false,
+	showControls = false, dropDistance = 0.85, dropInterval = 140, settingsKey,
+} = Astro.props;
+---
+
+<falling-text-cards
+	style={`--drop-distance: ${dropDistance}`}
+	data-soft={String(soft)} data-controls={String(showControls)}
+	data-distance={dropDistance} data-interval={dropInterval} data-settings-key={settingsKey}
+>
+	<div class="controls" data-controls-container hidden={!showControls}></div>
+	<section class="grid" data-stage aria-label={label} hidden={items.length === 0}>
+		{items.map((item) => (
+			<article class="entry" style={`--item-color: ${item.color ?? color}`}>
+				<div class="object" data-card>
+					<h2>{item.label}</h2>
+				</div>
+				<p class="description">{item.description}</p>
+			</article>
+		))}
+		<svg class="skin" data-skin aria-hidden="true" focusable="false"></svg>
+	</section>
+</falling-text-cards>
+
+<style>
+	falling-text-cards { display: block; max-width: 1080px; margin: 0 auto 4rem; padding-inline: 1.25rem; color: #1a1a1a; font-family: "Helvetica Neue", "Hiragino Sans", "Noto Sans JP", sans-serif; }
+	falling-text-cards, falling-text-cards * { box-sizing: border-box; }
+	.controls { width: min(280px, 100%); margin: 0 0 16px auto; }
+	.controls[hidden], .grid[hidden] { display: none; }
+	.grid { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); row-gap: 100px; column-gap: 28px; }
+	.entry { min-width: 0; }
+	.object { position: relative; display: grid; place-items: center; aspect-ratio: 35 / 14; padding: 1rem; overflow: hidden; border-radius: 5px; color: #fff; background: var(--item-color); transform-origin: center; }
+	h2 { margin: 0; max-width: 100%; font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; font-size: clamp(1.5rem, 3.5vw, 2.75rem); font-weight: 700; line-height: 1; letter-spacing: -0.04em; text-align: center; overflow-wrap: anywhere; }
+	.description { margin: 14px 0 0; font-size: 16px; line-height: 1.8; overflow-wrap: anywhere; }
+	.skin { display: none; position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+	falling-text-cards[data-active="true"] .object { will-change: transform, opacity; }
+	falling-text-cards[data-active="true"][data-mode="soft"] .object { background: transparent; }
+	falling-text-cards[data-active="true"][data-mode="soft"] .skin { display: block; }
+	@media (min-width: 1024px) {
+		.grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+		.object { aspect-ratio: 43 / 20; }
+	}
+	@media (min-width: 1024px) and (prefers-reduced-motion: no-preference) {
+		.grid { padding-top: calc(var(--drop-distance) * (100% - 56px) / 3 * 20 / 43); }
+	}
+</style>
+
+<script>
+	import Matter from "matter-js";
+	import { Pane } from "tweakpane";
+
+	const { Engine, Bodies, Body, Composite, Constraint, Sleeping } = Matter;
+	const NS = "http://www.w3.org/2000/svg";
+
+	function mount(root: HTMLElement) {
+		const stage = root.querySelector<HTMLElement>("[data-stage]")!;
+		const cards = [...root.querySelectorAll<HTMLElement>("[data-card]")];
+		const skin = root.querySelector<SVGSVGElement>("[data-skin]")!;
+		const wide = matchMedia("(min-width: 1024px)");
+		const reduced = matchMedia("(prefers-reduced-motion: reduce)");
+		const abort = new AbortController();
+		const defaults = {
+			soft: root.dataset.soft === "true", skeleton: false,
+			columns: 6, rows: 6, angle: 0.04 * 180 / Math.PI, restitution: 0.34,
+			dropDistance: Number(root.dataset.distance), dropInterval: Number(root.dataset.interval),
+			gravity: 1.05, frictionAir: 0.006, lockFrames: 18,
+		};
+		const params = { ...defaults };
+		const key = root.dataset.settingsKey;
+		if (key) {
+			const query = new URL(location.href).searchParams;
+			const mode = query.get(`${key}.physics`);
+			if (mode === "soft" || mode === "rigid") params.soft = mode === "soft";
+		}
+		let engine: ReturnType<typeof Engine.create> | undefined;
+		let items: ReturnType<typeof makeItem>[] = [];
+		let frame = 0, resizeFrame = 0, last = 0, elapsed = 0, accumulator = 0;
+		let visible = true, settled = false, active = false, disposed = false;
+		let measuredWidth = 0, measuredHeight = 0;
+
+		function saveSettings() {
+			if (!key) return;
+			const url = new URL(location.href);
+			url.searchParams.set(`${key}.physics`, params.soft ? "soft" : "rigid");
+			history.replaceState(history.state, "", url);
+		}
+
+		function svgElement<K extends keyof SVGElementTagNameMap>(tag: K, attributes: Record<string, string>) {
+			const element = document.createElementNS(NS, tag);
+			for (const [name, value] of Object.entries(attributes)) element.setAttribute(name, value);
+			return element;
+		}
+
+		function makeItem(element: HTMLElement, index: number, bounds: DOMRect) {
+			const rect = element.getBoundingClientRect();
+			const home = { x: rect.left - bounds.left + rect.width / 2, y: rect.top - bounds.top + rect.height / 2, width: rect.width, height: rect.height };
+			const filter = { group: index + 1, category: 1, mask: 0 };
+			const options = { restitution: params.restitution, friction: 0.25, frictionStatic: 0.4, frictionAir: params.frictionAir, sleepThreshold: 40, collisionFilter: filter };
+			const composite = Composite.create();
+			const rests: { x: number; y: number }[] = [];
+			let surface: SVGPathElement | null = null;
+			let skeleton: SVGPathElement | null = null;
+			const outline: number[] = [];
+			let bottomExtent = 0;
+			if (params.soft) {
+				const dx = home.width / (params.columns - 1), dy = home.height / (params.rows - 1);
+				const radius = Math.max(3, Math.min(dx, dy) * 0.12);
+				for (let row = 0; row < params.rows; row++) for (let col = 0; col < params.columns; col++) {
+					const rest = { x: col * dx - home.width / 2, y: row * dy - home.height / 2 };
+					rests.push(rest);
+					Composite.add(composite, Bodies.circle(home.x + rest.x, home.y + rest.y, radius, options));
+				}
+				const bodies = composite.bodies;
+				for (let row = 0; row < params.rows; row++) for (let col = 0; col < params.columns; col++) {
+					const id = row * params.columns + col;
+					const connect = (other: number, stiffness: number) => Composite.add(composite, Constraint.create({ bodyA: bodies[id], bodyB: bodies[other], stiffness, damping: 0.08 }));
+					if (col < params.columns - 1) connect(id + 1, 0.72);
+					if (row < params.rows - 1) connect(id + params.columns, 0.72);
+					if (col < params.columns - 1 && row < params.rows - 1) connect(id + params.columns + 1, 0.45);
+				}
+				bottomExtent = bodies[0].bounds.max.y - bodies[0].position.y;
+				for (let col = 0; col < params.columns; col++) outline.push(col);
+				for (let row = 1; row < params.rows; row++) outline.push(row * params.columns + params.columns - 1);
+				for (let col = params.columns - 2; col >= 0; col--) outline.push((params.rows - 1) * params.columns + col);
+				for (let row = params.rows - 2; row > 0; row--) outline.push(row * params.columns);
+				surface = svgElement("path", { fill: getComputedStyle(element).backgroundColor, opacity: "0" });
+				skeleton = svgElement("path", { fill: "none", stroke: "#ffcc00", "stroke-width": "1", display: "none" });
+				skin.append(surface, skeleton);
+			} else {
+				rests.push({ x: 0, y: 0 });
+				Composite.add(composite, Bodies.rectangle(home.x, home.y, home.width, home.height, options));
+			}
+			const shelf = Bodies.rectangle(home.x, home.y + home.height / 2 + bottomExtent + 110, home.width + home.height, 220, { ...options, isStatic: true });
+			Composite.add(engine!.world, shelf);
+			return { element, home, composite, rests, surface, skeleton, outline, index, dropped: false, locked: false, settling: false, calm: 0, fade: 0 };
+		}
+
+		function drop(item: ReturnType<typeof makeItem>) {
+			const angle = (item.index % 2 ? 1 : -1) * params.angle * Math.PI / 180;
+			item.composite.bodies.forEach((body, index) => {
+				const rest = item.rests[index];
+				Body.setPosition(body, { x: item.home.x + rest.x * Math.cos(angle) - rest.y * Math.sin(angle), y: item.home.y - item.home.height * params.dropDistance + rest.x * Math.sin(angle) + rest.y * Math.cos(angle) });
+				if (!params.soft) Body.setAngle(body, angle);
+			});
+			Composite.add(engine!.world, item.composite);
+			item.dropped = true;
+		}
+
+		function update(item: ReturnType<typeof makeItem>) {
+			const bodies = item.composite.bodies, home = item.home;
+			const center = () => ({ x: bodies.reduce((s, b) => s + b.position.x, 0) / bodies.length, y: bodies.reduce((s, b) => s + b.position.y, 0) / bodies.length });
+			if (!item.locked) {
+				if (item.settling) {
+					let remaining = 0;
+					bodies.forEach((body, index) => {
+						const dx = home.x + item.rests[index].x - body.position.x, dy = home.y + item.rests[index].y - body.position.y;
+						remaining = Math.max(remaining, Math.hypot(dx, dy));
+						Body.setPosition(body, { x: body.position.x + dx * 0.2, y: body.position.y + dy * 0.2 });
+					});
+					if (remaining < 0.05) {
+						bodies.forEach((body, index) => Body.setPosition(body, { x: home.x + item.rests[index].x, y: home.y + item.rests[index].y }));
+						item.locked = true;
+					}
+				} else {
+					const point = center(), offset = home.x - point.x;
+					bodies.forEach(body => {
+						Body.setPosition(body, { x: body.position.x + offset, y: body.position.y });
+						Body.setVelocity(body, { x: 0, y: body.velocity.y });
+						if (point.y < home.y - 12 && body.isSleeping) Sleeping.set(body, false);
+					});
+					const calm = point.y > home.y - 12 && bodies.every(b => Math.abs(b.velocity.y) < 0.65 && (params.soft || Body.getAngularSpeed(b) < 0.15));
+					item.calm = calm ? item.calm + 1 : 0;
+					if (item.calm >= params.lockFrames) {
+						bodies.forEach(body => { Body.setVelocity(body, { x: 0, y: 0 }); Body.setAngularVelocity(body, 0); Body.setStatic(body, true); });
+						item.fade = 1;
+						if (params.soft) item.settling = true;
+						else { Body.setPosition(bodies[0], home); Body.setAngle(bodies[0], 0); item.locked = true; }
+					}
+				}
+			}
+			const point = center(), distance = home.height * params.dropDistance;
+			item.fade = Math.max(item.fade, Math.min(1, Math.max(0, distance ? (point.y - home.y + distance) / distance : 1)));
+			item.element.style.opacity = String(item.fade);
+			if (!params.soft) {
+				item.element.style.transform = `translateY(${point.y - home.y}px) rotate(${bodies[0].angle}rad)`;
+				return;
+			}
+			item.surface!.setAttribute("d", `M${item.outline.map(id => `${bodies[id].position.x},${bodies[id].position.y}`).join(" L")} Z`);
+			item.surface!.setAttribute("opacity", String(item.fade));
+			const edge = (ids: number[]) => ({ x: ids.reduce((s, id) => s + bodies[id].position.x, 0) / ids.length, y: ids.reduce((s, id) => s + bodies[id].position.y, 0) / ids.length });
+			const left = edge(Array.from({ length: params.rows }, (_, r) => r * params.columns));
+			const right = edge(Array.from({ length: params.rows }, (_, r) => r * params.columns + params.columns - 1));
+			const top = edge(Array.from({ length: params.columns }, (_, c) => c));
+			const bottom = edge(Array.from({ length: params.columns }, (_, c) => (params.rows - 1) * params.columns + c));
+			// Move only the original HTML object and its label; the description stays in place.
+			item.element.style.transform = `matrix(${(right.x - left.x) / home.width},${(right.y - left.y) / home.width},${(bottom.x - top.x) / home.height},${(bottom.y - top.y) / home.height},${point.x - home.x},${point.y - home.y})`;
+			item.element.style.zIndex = "1";
+			paintSkeleton(item);
+		}
+
+		function paintSkeleton(item: ReturnType<typeof makeItem>) {
+			if (!item.skeleton) return;
+			item.skeleton.setAttribute("display", params.skeleton && item.dropped ? "inline" : "none");
+			item.skeleton.setAttribute("d", item.composite.constraints.map(({ bodyA, bodyB }) => `M${bodyA.position.x},${bodyA.position.y} L${bodyB.position.x},${bodyB.position.y}`).join(" "));
+		}
+
+		function pause() { cancelAnimationFrame(frame); frame = 0; last = 0; }
+		function resume() {
+			if (!disposed && active && !settled && !document.hidden && visible && !frame) frame = requestAnimationFrame(tick);
+		}
+		function tick(now: number) {
+			frame = 0;
+			const delta = last ? Math.min(now - last, 64) : 0;
+			last = now; elapsed += delta; accumulator += delta;
+			for (const item of items) if (!item.dropped && elapsed >= item.index * params.dropInterval) drop(item);
+			while (accumulator >= 1000 / 60) { Engine.update(engine!, 1000 / 60); accumulator -= 1000 / 60; }
+			for (const item of items) if (item.dropped) update(item);
+			settled = items.every(item => item.locked);
+			root.dataset.state = settled ? "settled" : "falling";
+			if (settled) cards.forEach(card => { card.style.willChange = "auto"; });
+			else resume();
+		}
+
+		function rebuild() {
+			pause();
+			if (engine) { Composite.clear(engine.world, false); Engine.clear(engine); engine = undefined; }
+			skin.replaceChildren();
+			items = [];
+			root.dataset.active = "false";
+			root.dataset.mode = params.soft ? "soft" : "rigid";
+			root.style.setProperty("--drop-distance", String(params.dropDistance));
+			for (const card of cards) card.removeAttribute("style");
+			const bounds = stage.getBoundingClientRect();
+			measuredWidth = bounds.width; measuredHeight = bounds.height;
+			active = wide.matches && !reduced.matches && cards.length > 0;
+			root.dataset.state = "static";
+			if (!active) return;
+			engine = Engine.create({ enableSleeping: true });
+			engine.gravity.y = params.gravity;
+			engine.positionIterations = 10; engine.velocityIterations = 8;
+			skin.setAttribute("viewBox", `0 0 ${bounds.width} ${bounds.height}`);
+			items = cards.map((card, index) => makeItem(card, index, bounds));
+			root.dataset.active = "true";
+			for (const card of cards) card.style.opacity = "0";
+			elapsed = 0; accumulator = 0; settled = false;
+			resume();
+		}
+
+		let pane: Pane | undefined;
+		if (root.dataset.controls === "true") {
+			pane = new Pane({ title: "調整", container: root.querySelector<HTMLElement>("[data-controls-container]")!, expanded: false });
+			let resetting = false;
+			pane.addBinding(params, "soft", { label: "Soft" }).on("change", () => { if (!resetting) { saveSettings(); rebuild(); } });
+			const softControls = pane.addFolder({ title: "Softの調整", expanded: false, hidden: !params.soft });
+			pane.on("change", () => { softControls.hidden = !params.soft; });
+			softControls.addBinding(params, "skeleton", { label: "骨格を表示" }).on("change", () => items.forEach(paintSkeleton));
+			const controls = [
+				["columns", "列数（横）", 2, 20, 1], ["rows", "行数（縦）", 2, 20, 1],
+				["angle", "傾き（度）", 0, 25, 0.1], ["restitution", "反発", 0, 1, 0.01],
+				["dropDistance", "落ち始めの高さ", 0, 3, 0.05], ["gravity", "重力", 0, 3, 0.05],
+				["frictionAir", "空気抵抗", 0, 0.05, 0.001], ["dropInterval", "落下の間隔", 0, 800, 10], ["lockFrames", "止まるまでのフレーム", 1, 90, 1],
+			] as const;
+			for (const [key, label, min, max, step] of controls) {
+				const folder = key === "columns" || key === "rows" ? softControls : pane;
+				folder.addBinding(params, key, { label, min, max, step }).on("change", ({ last }) => { if (last && !resetting) rebuild(); });
+			}
+			pane.addButton({ title: "もう一度落とす" }).on("click", rebuild);
+			pane.addButton({ title: "初期状態に戻す" }).on("click", () => { resetting = true; Object.assign(params, defaults); pane!.refresh(); resetting = false; saveSettings(); rebuild(); });
+		}
+
+		const scheduleRebuild = () => { cancelAnimationFrame(resizeFrame); resizeFrame = requestAnimationFrame(() => { if (!disposed) rebuild(); }); };
+		wide.addEventListener("change", scheduleRebuild, { signal: abort.signal });
+		reduced.addEventListener("change", scheduleRebuild, { signal: abort.signal });
+		document.addEventListener("visibilitychange", () => document.hidden ? pause() : resume(), { signal: abort.signal });
+		window.addEventListener("pagehide", pause, { signal: abort.signal });
+		window.addEventListener("pageshow", resume, { signal: abort.signal });
+		const observer = new IntersectionObserver(([entry]) => { visible = entry.isIntersecting; if (visible) resume(); else pause(); });
+		observer.observe(stage);
+		const resize = new ResizeObserver(() => {
+			const bounds = stage.getBoundingClientRect();
+			if (Math.abs(bounds.width - measuredWidth) > 0.5 || Math.abs(bounds.height - measuredHeight) > 0.5) scheduleRebuild();
+		});
+		rebuild();
+		resize.observe(stage);
+		return () => {
+			disposed = true; pause(); cancelAnimationFrame(resizeFrame); abort.abort(); observer.disconnect(); resize.disconnect(); pane?.dispose();
+			if (engine) { Composite.clear(engine.world, false); Engine.clear(engine); }
+			skin.replaceChildren();
+			root.dataset.active = "false";
+			for (const card of cards) card.removeAttribute("style");
+		};
+	}
+
+	class FallingTextCards extends HTMLElement {
+		private dispose?: () => void;
+		connectedCallback() { if (!this.dispose) this.dispose = mount(this); }
+		disconnectedCallback() { this.dispose?.(); this.dispose = undefined; }
+	}
+	if (!customElements.get("falling-text-cards")) customElements.define("falling-text-cards", FallingTextCards);
+</script>
